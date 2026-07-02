@@ -32,6 +32,7 @@ from .scene_types import (
 from .speech_sources import SpeechSourceManager
 from .s3_uploader import S3StreamingUploader
 from . import config
+from .llm import get_backend
 
 SAMPLE_RATE = config.SAMPLE_RATE
 
@@ -475,7 +476,7 @@ def run_parallel_production(
     """
     print("\n=== CINEAUDIOGEN: PARALLEL PRODUCTION ===\n")
 
-    api_key = config.gemini_api_key()
+    backend = get_backend()
     output_root = str(config.output_dir())
     os.makedirs(output_root, exist_ok=True)
 
@@ -497,9 +498,9 @@ def run_parallel_production(
 
     # Initialize shared resources (Director has heavy CLAP model)
     print("[INIT] Initializing Virtual Studio...")
-    director = CinematicDirector(api_key)
+    director = CinematicDirector(backend)
     engine = AudioEngine(sample_rate=SAMPLE_RATE)  # For loading audio in planning phase
-    critic = AudioCritic(api_key)
+    critic = AudioCritic(backend)
 
     # Initialize speech source manager
     print("[INIT] Loading speech sources...")

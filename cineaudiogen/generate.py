@@ -18,6 +18,7 @@ from .scene_types import (
     get_scene_type_config
 )
 from . import config
+from .llm import get_backend
 
 SAMPLE_RATE = config.SAMPLE_RATE
 
@@ -64,7 +65,7 @@ def generate_scene(scene_type=None, dialogue_path=None, scene_name=None, style=N
     """
     print("\n=== CINEAUDIOGEN: SINGLE SCENE ===\n")
 
-    api_key = config.gemini_api_key()
+    backend = get_backend()
 
     # Select scene type
     if scene_type is None:
@@ -74,9 +75,9 @@ def generate_scene(scene_type=None, dialogue_path=None, scene_name=None, style=N
 
     # 1. Initialize Agents
     print("[1/6] Initializing Virtual Studio...")
-    director = CinematicDirector(api_key)
+    director = CinematicDirector(backend)
     engine = AudioEngine(sample_rate=SAMPLE_RATE)
-    critic = AudioCritic(api_key)
+    critic = AudioCritic(backend)
 
     # 2. Pick a Dialogue (random unless one was provided)
     print("[2/6] Selecting Scene...")
@@ -220,6 +221,12 @@ def generate_scene(scene_type=None, dialogue_path=None, scene_name=None, style=N
     rough_mix_path = f"{rough_dir}/mix.wav"
     sf.write(rough_mix_path, rough_mix.T, SAMPLE_RATE)
 
+    # Measure stems + rough mix so the Critic can mix "by the meters"
+    # (essential for metrics-only LLM backends, useful context for all).
+    stem_analysis = {name: engine.analyze_stem(audio, name=name)
+                     for name, audio in raw_stems.items() if audio is not None}
+    stem_analysis["rough_mix"] = engine.analyze_stem(rough_mix, name="rough_mix")
+
     # Free the rough-mix working arrays; render_scene rebuilds from raw_stems.
     del processed_rough, rough_mix, speech_processed, sfx_rough
     gc.collect()
@@ -238,6 +245,7 @@ def generate_scene(scene_type=None, dialogue_path=None, scene_name=None, style=N
         "mood": scene_plan['gemini_context'].get('music_tag'),
         "rough_settings": rough_settings,
         "events": events_for_critic,
+        "stem_analysis": stem_analysis,  # Audio metrics for each stem
         "scene_type": scene_type.value,  # Include scene type in context
     }
 

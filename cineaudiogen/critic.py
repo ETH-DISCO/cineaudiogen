@@ -1,59 +1,26 @@
 import os
-import json
-from google import genai
-from google.genai import types
 
-# --- CONFIGURATION ---
+from .llm import get_backend, LLMError
 
-CRITIC_MODEL = "gemini-3-flash-preview" 
 
 class AudioCritic:
-    def __init__(self, api_key):
-        self.client = genai.Client(api_key=api_key)
-
-    def _usage_to_dict(self, response, model_name=None):
-        """Extract token usage from a Gemini response (best-effort)."""
-        usage = getattr(response, "usage_metadata", None)
-        if usage is None:
-            return {"model": model_name, "usage_metadata": None} if model_name else None
-
-        keys = [
-            "prompt_token_count",
-            "candidates_token_count",
-            "total_token_count",
-            "cached_content_token_count",
-        ]
-        usage_dict = {}
-        for k in keys:
-            v = getattr(usage, k, None)
-            if v is None:
-                continue
-            try:
-                usage_dict[k] = int(v)
-            except Exception:
-                usage_dict[k] = v
-
-        out = {"usage_metadata": usage_dict or None}
-        if model_name:
-            out["model"] = model_name
-        return out
+    def __init__(self, backend=None):
+        """Args:
+            backend: An LLMBackend (see llm.py). None builds one from the
+                     CINEAUDIOGEN_LLM_* environment configuration.
+        """
+        self.backend = backend or get_backend()
 
     def critique_mix(self, mix_path, scene_context):
         """
-        Listens to the rough mix and returns a JSON of DSP adjustments.
+        Listens to the rough mix (or, on metrics-only backends, reads the
+        per-stem measurements) and returns a JSON of DSP adjustments.
         Includes per-SFX event mixing parameters.
         """
         print(f"  [Critic] Analyzing rough mix: {os.path.basename(mix_path)}...")
 
-        # 1. Upload the Rough Mix
-        try:
-            audio_file = self.client.files.upload(file=mix_path)
-        except Exception as e:
-            print(f"  [Critic Error] Upload failed: {e}")
-            return self._get_fallback_settings(scene_context)
-
-        # 2. Construct the "Mixing Console" Prompt
-        # We teach Gemini how to control our engine.py
+        # 1. Construct the "Mixing Console" Prompt
+        # We teach the model how to control our engine.py
         rough = scene_context.get("rough_settings", {}) if isinstance(scene_context, dict) else {}
         rough_music_gain = None
         rough_speech_gain = None
@@ -191,44 +158,32 @@ class AudioCritic:
         Remember: Boost speech rather than crushing music. Small adjustments (-3 to -6 dB) are usually enough.
         """
 
-        # 3. Call Gemini
+        # 2. Call the LLM backend (retries, audio handling, and JSON parsing
+        # live in llm.py; low temperature for precise engineering numbers).
+        if not self.backend.supports_audio:
+            prompt += ("\n        Note: You cannot listen to the mix audio. Base your "
+                       "adjustments on the audio measurements and context above.\n")
         try:
-            response = self.client.models.generate_content(
-                model=CRITIC_MODEL,
-                contents=[audio_file, prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.4 # Low temp for precise engineering numbers
-                )
+            result, token_usage = self.backend.generate_json(
+                prompt, audio_path=mix_path, temperature=0.4,
             )
-            
-            result = json.loads(response.text)
-            critique_text = result.get('critique', 'No notes.')
-            print(f"  [Critic] Notes: {critique_text}")
-            adjustments = result.get("adjustments", self._get_fallback_settings())
-            if not isinstance(adjustments, dict):
-                adjustments = self._get_fallback_settings()
-
-            # Cleanup uploaded file to free Gemini storage quota
-            try:
-                self.client.files.delete(name=audio_file.name)
-            except Exception:
-                pass
-
-            # Attach extra keys for bookkeeping (ignored by mix merge).
-            adjustments["token_usage"] = self._usage_to_dict(response, model_name=CRITIC_MODEL)
-            adjustments["critique_text"] = critique_text  # Raw AI reasoning for debugging
-            adjustments["raw_adjustments"] = result.get("adjustments", {})  # Original before any processing
-            return adjustments
-
-        except Exception as e:
-            # Cleanup uploaded file even on error
-            try:
-                self.client.files.delete(name=audio_file.name)
-            except Exception:
-                pass
-            print(f"  [Critic Error] API failed: {e}")
+        except LLMError as e:
+            print(f"  [Critic Error] {e}")
             return self._get_fallback_settings(scene_context)
+
+        if not isinstance(result, dict):
+            return self._get_fallback_settings(scene_context)
+        critique_text = result.get('critique', 'No notes.')
+        print(f"  [Critic] Notes: {critique_text}")
+        adjustments = result.get("adjustments", self._get_fallback_settings())
+        if not isinstance(adjustments, dict):
+            adjustments = self._get_fallback_settings()
+
+        # Attach extra keys for bookkeeping (ignored by mix merge).
+        adjustments["token_usage"] = token_usage
+        adjustments["critique_text"] = critique_text  # Raw AI reasoning for debugging
+        adjustments["raw_adjustments"] = result.get("adjustments", {})  # Original before any processing
+        return adjustments
 
     def _get_fallback_settings(self, scene_context=None):
         """Safe defaults if AI fails.

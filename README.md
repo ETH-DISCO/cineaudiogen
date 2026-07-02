@@ -68,12 +68,25 @@ Python ≥ 3.12. `ffmpeg` is recommended for mp3 decoding during indexing.
 
 ## Setup
 
-**1. Gemini API key** (both agents use `gemini-3-flash-preview`):
+**1. LLM provider.** The Director and Critic run on a pluggable LLM backend
+(default: Gemini `gemini-3-flash-preview`):
 
 ```bash
 cp .env.example .env      # edit it, then:
 source .env
 ```
+
+| `CINEAUDIOGEN_LLM_PROVIDER` | Can *listen* to the audio? | Notes |
+|---|---|---|
+| `gemini` (default) | ✅ native, any length | best default; cheap flash tier |
+| `openai` | ✅ up to ~10 min/clip | `gpt-4o-audio` family; audio sent in-request at 16 kHz |
+| `openai-compatible` | model-dependent (`CINEAUDIOGEN_LLM_AUDIO=on`) | any OpenAI-style endpoint: OpenRouter, vLLM, Ollama, LM Studio — including local audio models like Qwen2-Audio |
+| `anthropic` | ❌ metrics-only | Claude mixes "by the meters": the Critic reasons from per-stem LUFS/LRA/peak/RMS/crest measurements instead of listening |
+
+Backends that can't listen still work — agents adapt their prompts, and the
+Critic always receives full loudness measurements. Install provider extras as
+needed: `pip install -e ".[openai]"` or `".[anthropic]"`. Override the model
+with `CINEAUDIOGEN_LLM_MODEL`.
 
 **2. Asset library.** Point `CINEAUDIOGEN_DATA_ROOT` (default `./data`) at:
 

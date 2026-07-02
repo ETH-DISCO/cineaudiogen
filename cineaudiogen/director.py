@@ -4,8 +4,6 @@ import random
 import numpy as np
 import scipy.spatial.distance
 import soundfile as sf
-from google import genai
-from google.genai import types
 import laion_clap
 import torch
 
@@ -16,13 +14,18 @@ from .scene_types import (
 )
 
 from . import config
+from .llm import get_backend, LLMError
 
 
 class CinematicDirector:
-    def __init__(self, api_key):
+    def __init__(self, backend=None):
+        """Args:
+            backend: An LLMBackend (see llm.py). None builds one from the
+                     CINEAUDIOGEN_LLM_* environment configuration.
+        """
         print("  [Director] Initializing Creative Agent...")
-        self.client = genai.Client(api_key=api_key)
-        
+        self.backend = backend or get_backend()
+
         # 1. Load CLAP (Heavy Model)
         print("  [Director] Loading CLAP for SFX retrieval...")
         self.clap_model = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-tiny')
@@ -166,37 +169,6 @@ class CinematicDirector:
             pass
         return None
 
-    def _usage_to_dict(self, response, model_name=None):
-        """Extract token usage from a Gemini response (best-effort).
-
-        The google-genai SDK exposes usage info on response.usage_metadata.
-        We keep this defensive so it doesn't break if fields differ.
-        """
-        usage = getattr(response, "usage_metadata", None)
-        if usage is None:
-            return {"model": model_name, "usage_metadata": None} if model_name else None
-
-        keys = [
-            "prompt_token_count",
-            "candidates_token_count",
-            "total_token_count",
-            "cached_content_token_count",
-        ]
-        usage_dict = {}
-        for k in keys:
-            v = getattr(usage, k, None)
-            if v is None:
-                continue
-            try:
-                usage_dict[k] = int(v)
-            except Exception:
-                usage_dict[k] = v
-
-        out = {"usage_metadata": usage_dict or None}
-        if model_name:
-            out["model"] = model_name
-        return out
-
     def _normalize_event_timestamps(self, events, duration_sec):
         """Ensure timestamps fit within the dialogue duration.
 
@@ -274,14 +246,7 @@ class CinematicDirector:
         include_ambience = should_include_stem(config, 'ambience')
         sfx_max_events = get_sfx_event_count(config)
 
-        # 1. Upload
-        try:
-            audio_file = self.client.files.upload(file=dialogue_path)
-        except Exception as e:
-            print(f"  [Director Error] Upload failed: {e}")
-            return None
-
-        # 2. Build prompt based on scene type
+        # 1. Build prompt based on scene type
         max_tags = min(len(self.valid_music_tags), 100)
         tags_list_str = ", ".join(self.valid_music_tags[:max_tags])
 
@@ -344,39 +309,18 @@ class CinematicDirector:
         }}
         """
 
-        # 3. Call Gemini with retry logic
-        model_name = "gemini-3-flash-preview"
-        max_retries = 3
-        retry_delay = 2.0
-        
-        for attempt in range(max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=model_name, 
-                    contents=[audio_file, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.65
-                    )
-                )
-                token_usage = self._usage_to_dict(response, model_name=model_name)
-                cue_sheet = json.loads(response.text)
-                break  # Success, exit retry loop
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"  [Director] Gemini attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
-                    import time
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                else:
-                    print(f"  [Director Error] Gemini API failed after {max_retries} attempts: {e}")
-                    return None
-
-        # Cleanup uploaded file to free Gemini storage quota
+        # 2. Call the LLM backend (retries, audio handling, and JSON parsing
+        # live in llm.py; metrics-only backends never receive the audio).
+        if not self.backend.supports_audio:
+            prompt += ("\n        Note: You cannot hear the dialogue audio. Base your "
+                       "decisions on the style context, scene type, and duration above.\n")
         try:
-            self.client.files.delete(name=audio_file.name)
-        except Exception:
-            pass
+            cue_sheet, token_usage = self.backend.generate_json(
+                prompt, audio_path=dialogue_path, temperature=0.65,
+            )
+        except LLMError as e:
+            print(f"  [Director Error] {e}")
+            return None
 
         # Safety: validate cue_sheet is a dict (Gemini sometimes returns arrays)
         if not isinstance(cue_sheet, dict):
@@ -391,7 +335,7 @@ class CinematicDirector:
                     dialogue_duration_sec,
                 )
 
-        # 4. Retrieve Assets (respecting null values from Gemini)
+        # 3. Retrieve Assets (respecting null values from the model)
         music_tag = cue_sheet.get('music_tag')
         ambience_cue = cue_sheet.get('ambience_cue')
 
@@ -424,7 +368,7 @@ class CinematicDirector:
                         "description": sound_desc
                     })
 
-        # 5. Return Manifesto with scene type info
+        # 4. Return Manifesto with scene type info
         return {
             "dialogue": dialogue_path,
             "music": music_path,

@@ -26,9 +26,10 @@ Deep-dive into the CineAudioGen pipeline. For install/quickstart see the
 
 | Component | Module | Role |
 |-----------|--------|------|
-| **Director** | `cineaudiogen/director.py` | Multimodal Gemini agent: analyzes dialogue audio, selects a music tag, describes ambience, places timestamped SFX events. Retrieves SFX/ambience via CLAP cosine similarity and music via tag lookup. |
+| **Director** | `cineaudiogen/director.py` | LLM agent: analyzes dialogue audio (on audio-capable backends), selects a music tag, describes ambience, places timestamped SFX events. Retrieves SFX/ambience via CLAP cosine similarity and music via tag lookup. |
 | **Engine** | `cineaudiogen/engine.py` | All DSP: loading/resampling, per-stem chains (gain, low-cut, compression, 14 reverb presets), envelope-following sidechain ducking (numba-JIT), mastering, stem export. |
-| **Critic** | `cineaudiogen/critic.py` | Multimodal Gemini agent: listens to the rough mix alongside per-stem measurements (LUFS, LRA, true peak, RMS, crest) and returns **delta** adjustments per stem and per SFX event. |
+| **Critic** | `cineaudiogen/critic.py` | LLM agent: listens to the rough mix (on audio-capable backends) alongside per-stem measurements (LUFS, LRA, true peak, RMS, crest) and returns **delta** adjustments per stem and per SFX event. |
+| **LLM backends** | `cineaudiogen/llm.py` | Provider abstraction for the two agents: Gemini (default, native audio), OpenAI (`gpt-4o-audio`), any OpenAI-compatible endpoint (local models), Anthropic Claude (metrics-only). Backends declare `supports_audio`; agents adapt prompts so text-only models mix from the measurements. |
 | **Scene types** | `cineaudiogen/scene_types.py` | Six weighted archetypes controlling stem presence, SFX density, gain offsets, ducking. |
 | **Speech sources** | `cineaudiogen/speech_sources.py` | Unified loader for dialogue corpora (Expresso; loaders included for RAVDESS, ASED, NonverbalTTS). Short clips are concatenated into pseudo-dialogues. |
 | **Validation** | `cineaudiogen/validate.py` | Dataset QA: additivity, loudness ranges, duration match, NaN/silence/corruption checks. |
