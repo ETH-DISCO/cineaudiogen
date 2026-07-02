@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cineaudiogen"
+version = "0.1.0"
+description = "Agentic pipeline for generating cinematic audio source-separation training data (speech/music/ambience/SFX stems with bit-exact additive mixes)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+authors = [
+    { name = "CineAudioGen authors" }
+]
+keywords = [
+    "audio", "source-separation", "cinematic-audio", "synthetic-data",
+    "gemini", "clap", "sound-design", "audio-processing", "machine-learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Multimedia :: Sound/Audio :: Mixers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "soundfile>=0.12.0",
+    "pedalboard>=0.9.0",
+    "pyloudnorm==0.1.1",
+    "numba>=0.59.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "laion-clap>=1.1.0",
+    "librosa>=0.10.0",
+    "google-genai>=0.1.0",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+s3 = [
+    "boto3>=1.28.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+cineaudiogen-scene = "cineaudiogen.generate:main"
+cineaudiogen-batch = "cineaudiogen.batch:main"
+cineaudiogen-long-scene = "cineaudiogen.long_scene:main"
+cineaudiogen-build-indices = "cineaudiogen.build_indices:main"
+cineaudiogen-validate = "cineaudiogen.validate:main"
+
+[project.urls]
+Homepage = "https://github.com/toofaloof/cineaudiogen"
+Repository = "https://github.com/toofaloof/cineaudiogen"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cineaudiogen*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]

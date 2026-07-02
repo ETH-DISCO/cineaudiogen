@@ -1,0 +1,21 @@
+# Environments & secrets
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Data & generated output (users supply their own assets)
+data/
+output/
+
+# Logs & scratch
+*.log
+.DS_Store
+.idea/
+.vscode/
